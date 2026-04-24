@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>Health Log</title>
+    <style>
+        body { font-family: sans-serif; background-color: #121212; color: #e0e0e0; margin: 0; padding: 10px; display: flex; justify-content: center; overflow: hidden; touch-action: manipulation; }
+        .card { background: #1e1e1e; padding: 15px; border-radius: 12px; width: 100%; max-width: 400px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        h3 { color: #ffffff; text-align: center; margin: 0 0 10px 0; font-size: 1.1em; }
+        label { display: block; margin-top: 8px; font-weight: bold; color: #b0b0b0; font-size: 0.7em; margin-bottom: 2px; }
+        .input-row { display: flex; gap: 8px; }
+        .input-item { flex: 1; }
+        input, textarea { width: 100%; padding: 8px; border: 1px solid #333; border-radius: 6px; background: #2c2c2c; color: #fff; font-size: 16px; box-sizing: border-box; }
+        .unit { color: #888; font-size: 0.7em; margin-left: -35px; width: 30px; text-align: right; }
+        .time-group { display: flex; gap: 4px; align-items: center; justify-content: center; background: #252525; padding: 5px; border-radius: 6px; }
+        select { background: #333; color: #fff; border: 1px solid #444; padding: 6px; border-radius: 4px; font-size: 14px; }
+        .sw-container { background: #252525; padding: 6px; border-radius: 6px; border: 1px solid #333; text-align: center; }
+        .sw-status { font-size: 0.7em; color: #03dac6; margin-bottom: 2px; }
+        .sw-btns { display: flex; gap: 6px; }
+        .sw-btn { flex: 1; padding: 8px; border: none; border-radius: 4px; font-weight: bold; font-size: 0.8em; }
+        .start { background: #03dac6; color: #000; }
+        .stop { background: #cf6679; color: #fff; }
+        .option-group { display: flex; gap: 3px; }
+        .opt-btn { flex: 1; padding: 8px 1px; background: #333; border: 1px solid #444; border-radius: 6px; color: #aaa; cursor: pointer; text-align: center; font-size: 0.65em; }
+        .opt-btn.active { background: #bb86fc; color: #000; font-weight: bold; }
+        .btn-submit { width: 100%; padding: 12px; background: #ffffff; border: none; border-radius: 8px; color: #000; font-weight: bold; font-size: 0.9em; margin-top: 12px; }
+        #msg { text-align: center; margin-top: 5px; color: #03dac6; font-size: 0.8em; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <form id="healthForm">
+            <label>睡眠 (22-3時 → 5-10時)</label>
+            <div class="time-group">
+                <select id="sleepH"></select>:<select id="sleepM"></select> → 
+                <select id="wakeH"></select>:<select id="wakeM"></select>
+            </div>
+
+            <label>運動</label>
+            <div class="sw-container">
+                <div id="statusEX" class="sw-status">未計測</div>
+                <div class="sw-btns">
+                    <button type="button" id="btnEX_start" class="sw-btn start" onclick="trackStart('EX')">開始</button>
+                    <button type="button" id="btnEX_stop" class="sw-btn stop" onclick="trackStop('EX')" disabled>終了</button>
+                </div>
+            </div>
+
+            <label>自覚 (希死念慮・自傷感情)</label>
+            <div class="option-group" id="mentalGroup">
+                <div class="opt-btn" onclick="setOpt('mental', 'なし')">なし</div>
+                <div class="opt-btn" onclick="setOpt('mental', '少しあり')">少し</div>
+                <div class="opt-btn" onclick="setOpt('mental', 'あり')">あり</div>
+                <div class="opt-btn" onclick="setOpt('mental', '強くあり')">強く</div>
+            </div>
+
+            <label>脳内会話</label>
+            <div class="option-group" id="speechGroup">
+                <div class="opt-btn" onclick="setOpt('speech', 'なし')">なし</div>
+                <div class="opt-btn" onclick="setOpt('speech', '少しあり')">少し</div>
+                <div class="opt-btn" onclick="setOpt('speech', 'あり')">あり</div>
+                <div class="opt-btn" onclick="setOpt('speech', '多い')">多い</div>
+            </div>
+
+            <div class="input-row">
+                <div class="input-item">
+                    <label>カロリー</label>
+                    <div style="display:flex;align-items:center;"><input type="number" id="calories" placeholder="0"><span class="unit">k</span></div>
+                </div>
+                <div class="input-item">
+                    <label>歩数</label>
+                    <div style="display:flex;align-items:center;"><input type="number" id="steps" placeholder="0"><span class="unit">歩</span></div>
+                </div>
+            </div>
+
+            <label>メモ</label>
+            <textarea id="memo" rows="1" placeholder="メモ"></textarea>
+
+            <button type="button" class="btn-submit" onclick="submitData()">送信</button>
+        </form>
+        <p id="msg"></p>
+    </div>
+
+    <script>
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbyODYxv6YeKN0QW3GA1jk9IvyblZYU-hNFnbJ9fEz5hkLL2C39wAbeFB9yDqdogCtYL0w/exec";
+
+        if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js'); }
+
+        let selections = { mental: null, speech: null }, results = { EX: 0 };
+
+        function setup() {
+            const sh = document.getElementById('sleepH'), wh = document.getElementById('wakeH');
+            const sm = document.getElementById('sleepM'), wm = document.getElementById('wakeM');
+            [22,23,0,1,2,3].forEach(h => sh.add(new Option(h, h)));
+            [5,6,7,8,9,10].forEach(h => wh.add(new Option(h, h)));
+            for(let i=0; i<60; i+=10) { 
+                const opt = i.toString().padStart(2,'0');
+                sm.add(new Option(opt, i)); wm.add(new Option(opt, i));
+            }
+            const startTime = localStorage.getItem('start_EX');
+            if (startTime) updateUI('EX', true, new Date(parseInt(startTime)));
+        }
+
+        function trackStart(key) {
+            const now = Date.now();
+            localStorage.setItem('start_' + key, now);
+            updateUI(key, true, new Date(now));
+        }
+
+        function trackStop(key) {
+            const startStr = localStorage.getItem('start_' + key);
+            if (!startStr) return;
+            const diffMin = Math.round((Date.now() - parseInt(startStr)) / (1000 * 60));
+            results[key] += diffMin;
+            localStorage.removeItem('start_' + key);
+            updateUI(key, false);
+            document.getElementById('status' + key).innerText = `${diffMin}分完了`;
+        }
+
+        function updateUI(key, isRunning, date) {
+            document.getElementById('btn' + key + '_start').disabled = isRunning;
+            document.getElementById('btn' + key + '_stop').disabled = !isRunning;
+            const statusEl = document.getElementById('status' + key);
+            if (isRunning) {
+                statusEl.innerText = date.getHours() + ":" + date.getMinutes().toString().padStart(2, '0') + "〜計測中";
+                statusEl.style.color = "#ff9800";
+            } else { statusEl.style.color = "#03dac6"; }
+        }
+
+        function setOpt(group, val) {
+            selections[group] = val;
+            const btns = document.getElementById(group + 'Group').getElementsByClassName('opt-btn');
+            for (let b of btns) b.classList.toggle('active', b.innerText === val || (b.innerText === '少し' && val === '少しあり') || (b.innerText === '強く' && val === '強くあり'));
+        }
+
+        function submitData() {
+            const msg = document.getElementById('msg');
+            msg.innerText = "送信中...";
+            
+            const sh = parseInt(document.getElementById('sleepH').value), sm = parseInt(document.getElementById('sleepM').value);
+            const wh = parseInt(document.getElementById('wakeH').value), wm = parseInt(document.getElementById('wakeM').value);
+            let sDate = new Date(2000, 0, 1, sh, sm), wDate = new Date(2000, 0, 1, wh, wm);
+            if (wDate <= sDate) wDate.setDate(wDate.getDate() + 1);
+            const diffMin = Math.floor((wDate - sDate) / (1000 * 60));
+            const duration = Math.floor(diffMin / 60) + "時間" + (diffMin % 60) + "分";
+
+            const formData = {
+                sleepTime: sh + ":" + sm.toString().padStart(2,'0'),
+                wakeTime: wh + ":" + wm.toString().padStart(2,'0'),
+                sleepDuration: duration,
+                calories: document.getElementById('calories').value,
+                mental: selections.mental,
+                internalSpeech: selections.speech,
+                steps: document.getElementById('steps').value,
+                exercise: Math.floor(results.EX/60) + "時間" + (results.EX%60) + "分",
+                memo: document.getElementById('memo').value
+            };
+
+            fetch(GAS_URL, {
+                method: "POST",
+                body: JSON.stringify(formData)
+            })
+            .then(res => res.text())
+            .then(text => {
+                msg.innerText = text;
+                document.getElementById('healthForm').reset();
+                selections = { mental: null, speech: null }; results = { EX: 0 };
+                document.querySelectorAll('.opt-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.sw-status').forEach(s => s.innerText = "未計測");
+            })
+            .catch(err => msg.innerText = "通信エラー");
+        }
+        setup();
+    </script>
+</body>
+</html>
